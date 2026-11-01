@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Agrovet dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="data.js"></script>
+  <style>
+    body { font-family: Georgia, serif; background: #EFE9DA; color: #1B2A22; padding: 16px; }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .chips button { font: inherit; padding: 6px 16px; border: 1px solid #D8CFB8; border-radius: 6px;
+                    background: #FBF8F0; cursor: pointer; }
+    .chips button.on { background: #1F4D3A; color: #fff; border-color: #1F4D3A; }
+    .kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .kpi { background: #FBF8F0; border-left: 4px solid #1F4D3A; border-radius: 6px;
+           padding: 10px 16px; min-width: 140px; }
+    .kpi small { color: #6B7366; font-size: 13px; }
+    .kpi b { display: block; font-size: 22px; margin-top: 2px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; max-width: 1100px; }
+    .card { background: #FBF8F0; border-radius: 6px; padding: 12px; min-width: 0; }
+    .card h2 { margin: 0 0 8px; font-size: 15px; }
+    .box { height: 280px; }
+  </style>
+</head>
+<body>
+  <h1>Agrovet sales dashboard</h1>
+
+  <div class="chips" id="chips"></div>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card"><h2>Revenue and profit by month</h2><div class="box"><canvas id="cLine"></canvas></div></div>
+    <div class="card"><h2>Revenue by product (top 8)</h2><div class="box"><canvas id="cBar"></canvas></div></div>
+    <div class="card"><h2>Share of revenue (top 8)</h2><div class="box"><canvas id="cDon"></canvas></div></div>
+  </div>
+
+  <script>
+    // Stop with a clear message if data.js is missing
+    if (typeof DATA === "undefined") {
+      document.body.innerHTML = "<h1>data.js not found</h1><p>Run prepare_data.py first, and keep data.js in the same folder as index.html.</p>";
+      throw new Error("data.js missing");
+    }
+
+    // 1. HELPER
+    function groupSum(rows, key, getValue) {
+      const out = {};
+      rows.forEach(r => out[r[key]] = (out[r[key]] || 0) + getValue(r));
+      return out;
+    }
+
+    // 2. LISTS built from the data, so any dataset works
+    const MONTHS   = [...new Set(DATA.map(r => r.month))].sort();
+    const BRANCHES = [...new Set(DATA.map(r => r.branch))].sort();
+    const topRev   = groupSum(DATA, "product", r => r.revenue);
+    const PRODUCTS = Object.keys(topRev).sort((a, b) => topRev[b] - topRev[a]).slice(0, 8);
+
+    const GREEN = "#1F4D3A", GOLD = "#C8962E";
+    const PALETTE = ["#1F4D3A", "#C8962E", "#9C4A32", "#6B8F71", "#8A6D3B", "#4F7CAC", "#B08968", "#7A8B99"];
+
+    // 3. STATE
+    let branch = "All";
+
+    // 4. CHARTS: created once, empty. render() fills them.
+    Chart.defaults.maintainAspectRatio = false;
+    const line = new Chart(document.getElementById("cLine"), {
+      type: "line",
+      data: { labels: MONTHS, datasets: [
+        { label: "Revenue", data: [], borderColor: GREEN, backgroundColor: GREEN },
+        { label: "Profit",  data: [], borderColor: GOLD,  backgroundColor: GOLD }
+      ]},
+      options: { plugins: { legend: { position: "bottom" } } }
+    });
+    const bar = new Chart(document.getElementById("cBar"), {
+      type: "bar",
+      data: { labels: PRODUCTS, datasets: [{ label: "Revenue (KES)", data: [], backgroundColor: GREEN }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false } } }
+    });
+    const don = new Chart(document.getElementById("cDon"), {
+      type: "doughnut",
+      data: { labels: PRODUCTS, datasets: [{ data: [], backgroundColor: PALETTE }] },
+      options: { plugins: { legend: { position: "bottom" } } }
+    });
+
+    // 5. RENDER
+    function render() {
+      const rows = DATA.filter(r => branch === "All" || r.branch === branch);
+
+      const revenue = rows.reduce((a, r) => a + r.revenue, 0);
+      const cost    = rows.reduce((a, r) => a + r.cost, 0);
+      const profit  = revenue - cost;
+      const units   = rows.reduce((a, r) => a + r.units, 0);
+
+      document.getElementById("kpis").innerHTML = `
+        <div class="kpi"><small>Revenue</small><b>KES ${Math.round(revenue).toLocaleString()}</b></div>
+        <div class="kpi"><small>Profit</small><b>KES ${Math.round(profit).toLocaleString()}</b></div>
+        <div class="kpi"><small>Margin</small><b>${revenue ? (profit / revenue * 100).toFixed(1) : 0}%</b></div>
+        <div class="kpi"><small>Units sold</small><b>${Math.round(units).toLocaleString()}</b></div>`;
+
+      const revM  = groupSum(rows, "month", r => r.revenue);
+      const costM = groupSum(rows, "month", r => r.cost);
+      line.data.datasets[0].data = MONTHS.map(m => revM[m] || 0);
+      line.data.datasets[1].data = MONTHS.map(m => (revM[m] || 0) - (costM[m] || 0));
+
+      const revP = groupSum(rows, "product", r => r.revenue);
+      bar.data.datasets[0].data = PRODUCTS.map(p => revP[p] || 0);
+      don.data.datasets[0].data = PRODUCTS.map(p => revP[p] || 0);
+
+      line.update(); bar.update(); don.update();
+    }
+
+    // 6. BUTTONS
+    function drawChips() {
+      document.getElementById("chips").innerHTML = ["All", ...BRANCHES]
+        .map(b => `<button class="${b === branch ? "on" : ""}" data-b="${b}">${b}</button>`).join("");
+      document.querySelectorAll("#chips button").forEach(btn => {
+        btn.onclick = () => { branch = btn.dataset.b; drawChips(); render(); };
+      });
+    }
+
+    drawChips();
+    render();
+  </script>
+</body>
+</html>
