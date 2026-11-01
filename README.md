@@ -2,7 +2,7 @@
 
 An interactive sales dashboard for a multi-branch agrovet business in Kenya. It turns point-of-sale (POS) data into KPIs and charts that update when you pick a branch.
 
-**Live demo:** https://davidmaumo18-dot.github.io/agrovet-sales-dashboard/
+**Live demo:** https://davidmaumo18-dot.github.io/agrovet-sales-dashboard
 
 ## What it shows
 
