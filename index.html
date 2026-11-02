@@ -2,69 +2,100 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agrovet dashboard</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="data.js"></script>
   <style>
     body { font-family: Georgia, serif; background: #EFE9DA; color: #1B2A22; padding: 16px; }
-    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-    .chips button { font: inherit; padding: 6px 16px; border: 1px solid #D8CFB8; border-radius: 6px;
-                    background: #FBF8F0; cursor: pointer; }
+    h1 { margin: 0 0 4px; }
+    .sub { color: #6B7366; font-size: 14px; margin: 0 0 12px; }
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    button, select { font: inherit; padding: 6px 12px; border: 1px solid #D8CFB8; border-radius: 6px;
+                     background: #FBF8F0; color: #1B2A22; cursor: pointer; }
     .chips button.on { background: #1F4D3A; color: #fff; border-color: #1F4D3A; }
+    label { font-size: 13px; color: #6B7366; }
     .kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
     .kpi { background: #FBF8F0; border-left: 4px solid #1F4D3A; border-radius: 6px;
            padding: 10px 16px; min-width: 140px; }
     .kpi small { color: #6B7366; font-size: 13px; }
     .kpi b { display: block; font-size: 22px; margin-top: 2px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; max-width: 1100px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; max-width: 1200px; }
     .card { background: #FBF8F0; border-radius: 6px; padding: 12px; min-width: 0; }
     .card h2 { margin: 0 0 8px; font-size: 15px; }
     .box { height: 280px; }
+    .wide { grid-column: 1 / -1; }
+    .scroll { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid #E4DCC6; }
+    th:nth-child(-n+2), td:nth-child(-n+2) { text-align: left; }
+    th { color: #6B7366; font-weight: normal; }
   </style>
 </head>
 <body>
   <h1>Agrovet sales dashboard</h1>
+  <p class="sub" id="sub"></p>
 
-  <div class="chips" id="chips"></div>
+  <div class="filters">
+    <div class="chips" id="chips"></div>
+    <label>Category <select id="selCat"></select></label>
+    <label>From <select id="selFrom"></select></label>
+    <label>To <select id="selTo"></select></label>
+    <button id="reset">Reset</button>
+  </div>
+
   <div class="kpis" id="kpis"></div>
 
   <div class="grid">
     <div class="card"><h2>Revenue and profit by month</h2><div class="box"><canvas id="cLine"></canvas></div></div>
     <div class="card"><h2>Revenue by product (top 8)</h2><div class="box"><canvas id="cBar"></canvas></div></div>
-    <div class="card"><h2>Share of revenue (top 8)</h2><div class="box"><canvas id="cDon"></canvas></div></div>
+    <div class="card"><h2>Share of revenue by category</h2><div class="box"><canvas id="cDon"></canvas></div></div>
+    <div class="card"><h2>Revenue by payment method</h2><div class="box"><canvas id="cPay"></canvas></div></div>
+    <div class="card wide">
+      <h2>Top salespeople</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>#</th><th>Salesperson</th><th>Revenue (KES)</th><th>Profit (KES)</th><th>Margin</th><th>Units</th></tr></thead>
+          <tbody id="reps"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script>
-    // Stop with a clear message if data.js is missing
-    if (typeof DATA === "undefined") {
-      document.body.innerHTML = "<h1>data.js not found</h1><p>Run prepare_data.py first, and keep data.js in the same folder as index.html.</p>";
-      throw new Error("data.js missing");
+    // Stop with a clear message if data.js is missing or old
+    if (typeof DATA === "undefined" || !DATA.length || !("rep" in DATA[0])) {
+      document.body.innerHTML = "<h1>Data file needs updating</h1><p>Run the new prepare_data.py, and keep data.js in the same folder as index.html.</p>";
+      throw new Error("data.js missing or old");
     }
 
-    // 1. HELPER
+    // 1. HELPERS
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const fmt = n => Math.round(n).toLocaleString();
     function groupSum(rows, key, getValue) {
       const out = {};
       rows.forEach(r => out[r[key]] = (out[r[key]] || 0) + getValue(r));
       return out;
     }
+    const topN = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n);
 
-    // 2. LISTS built from the data, so any dataset works
+    // 2. LISTS built from the data
     const MONTHS   = [...new Set(DATA.map(r => r.month))].sort();
     const BRANCHES = [...new Set(DATA.map(r => r.branch))].sort();
-    const topRev   = groupSum(DATA, "product", r => r.revenue);
-    const PRODUCTS = Object.keys(topRev).sort((a, b) => topRev[b] - topRev[a]).slice(0, 8);
-
+    const CATS     = [...new Set(DATA.map(r => r.category))].sort();
     const GREEN = "#1F4D3A", GOLD = "#C8962E";
     const PALETTE = ["#1F4D3A", "#C8962E", "#9C4A32", "#6B8F71", "#8A6D3B", "#4F7CAC", "#B08968", "#7A8B99"];
 
-    // 3. STATE
-    let branch = "All";
+    // 3. STATE: everything the viewer can select
+    const DEFAULTS = { branch: "All", cat: "All", from: MONTHS[0], to: MONTHS[MONTHS.length - 1] };
+    let S = { ...DEFAULTS };
 
     // 4. CHARTS: created once, empty. render() fills them.
     Chart.defaults.maintainAspectRatio = false;
     const line = new Chart(document.getElementById("cLine"), {
       type: "line",
-      data: { labels: MONTHS, datasets: [
+      data: { labels: [], datasets: [
         { label: "Revenue", data: [], borderColor: GREEN, backgroundColor: GREEN },
         { label: "Profit",  data: [], borderColor: GOLD,  backgroundColor: GOLD }
       ]},
@@ -72,50 +103,111 @@
     });
     const bar = new Chart(document.getElementById("cBar"), {
       type: "bar",
-      data: { labels: PRODUCTS, datasets: [{ label: "Revenue (KES)", data: [], backgroundColor: GREEN }] },
+      data: { labels: [], datasets: [{ label: "Revenue (KES)", data: [], backgroundColor: GREEN }] },
       options: { indexAxis: "y", plugins: { legend: { display: false } } }
     });
     const don = new Chart(document.getElementById("cDon"), {
       type: "doughnut",
-      data: { labels: PRODUCTS, datasets: [{ data: [], backgroundColor: PALETTE }] },
+      data: { labels: [], datasets: [{ data: [], backgroundColor: PALETTE }] },
       options: { plugins: { legend: { position: "bottom" } } }
     });
+    const pay = new Chart(document.getElementById("cPay"), {
+      type: "bar",
+      data: { labels: [], datasets: [{ label: "Revenue (KES)", data: [], backgroundColor: GOLD }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false } } }
+    });
 
-    // 5. RENDER
+    // 5. RENDER: redraws everything from the current selection
     function render() {
-      const rows = DATA.filter(r => branch === "All" || r.branch === branch);
+      const rows = DATA.filter(r =>
+        (S.branch === "All" || r.branch === S.branch) &&
+        (S.cat === "All" || r.category === S.cat) &&
+        r.month >= S.from && r.month <= S.to);
 
+      document.getElementById("sub").textContent =
+        `${S.branch === "All" ? "All branches" : S.branch} · ${S.cat === "All" ? "All categories" : S.cat} · ${S.from} to ${S.to}`;
+
+      // KPI cards
       const revenue = rows.reduce((a, r) => a + r.revenue, 0);
       const cost    = rows.reduce((a, r) => a + r.cost, 0);
       const profit  = revenue - cost;
       const units   = rows.reduce((a, r) => a + r.units, 0);
-
       document.getElementById("kpis").innerHTML = `
-        <div class="kpi"><small>Revenue</small><b>KES ${Math.round(revenue).toLocaleString()}</b></div>
-        <div class="kpi"><small>Profit</small><b>KES ${Math.round(profit).toLocaleString()}</b></div>
+        <div class="kpi"><small>Revenue</small><b>KES ${fmt(revenue)}</b></div>
+        <div class="kpi"><small>Profit</small><b>KES ${fmt(profit)}</b></div>
         <div class="kpi"><small>Margin</small><b>${revenue ? (profit / revenue * 100).toFixed(1) : 0}%</b></div>
-        <div class="kpi"><small>Units sold</small><b>${Math.round(units).toLocaleString()}</b></div>`;
+        <div class="kpi"><small>Units sold</small><b>${fmt(units)}</b></div>`;
 
-      const revM  = groupSum(rows, "month", r => r.revenue);
+      // Line: months inside the selected range
+      const ms = MONTHS.filter(m => m >= S.from && m <= S.to);
+      const revM = groupSum(rows, "month", r => r.revenue);
       const costM = groupSum(rows, "month", r => r.cost);
-      line.data.datasets[0].data = MONTHS.map(m => revM[m] || 0);
-      line.data.datasets[1].data = MONTHS.map(m => (revM[m] || 0) - (costM[m] || 0));
+      line.data.labels = ms;
+      line.data.datasets[0].data = ms.map(m => revM[m] || 0);
+      line.data.datasets[1].data = ms.map(m => (revM[m] || 0) - (costM[m] || 0));
 
-      const revP = groupSum(rows, "product", r => r.revenue);
-      bar.data.datasets[0].data = PRODUCTS.map(p => revP[p] || 0);
-      don.data.datasets[0].data = PRODUCTS.map(p => revP[p] || 0);
+      // Top products
+      const prod = topN(groupSum(rows, "product", r => r.revenue), 8);
+      bar.data.labels = prod.map(p => p[0]);
+      bar.data.datasets[0].data = prod.map(p => p[1]);
 
-      line.update(); bar.update(); don.update();
+      // Categories
+      const cats = topN(groupSum(rows, "category", r => r.revenue), 8);
+      don.data.labels = cats.map(c => c[0]);
+      don.data.datasets[0].data = cats.map(c => c[1]);
+
+      // Payment methods
+      const pays = topN(groupSum(rows, "pay", r => r.revenue), 8);
+      pay.data.labels = pays.map(p => p[0]);
+      pay.data.datasets[0].data = pays.map(p => p[1]);
+
+      line.update(); bar.update(); don.update(); pay.update();
+
+      // Salespeople table
+      const reps = {};
+      rows.forEach(r => {
+        const x = reps[r.rep] = reps[r.rep] || { rev: 0, cost: 0, units: 0 };
+        x.rev += r.revenue; x.cost += r.cost; x.units += r.units;
+      });
+      const list = Object.entries(reps).sort((a, b) => b[1].rev - a[1].rev);
+      document.getElementById("reps").innerHTML = list.map(([name, x], i) => `
+        <tr><td>${i + 1}</td><td>${esc(name)}</td><td>${fmt(x.rev)}</td><td>${fmt(x.rev - x.cost)}</td>
+        <td>${x.rev ? ((x.rev - x.cost) / x.rev * 100).toFixed(1) : 0}%</td><td>${fmt(x.units)}</td></tr>`).join("");
     }
 
-    // 6. BUTTONS
+    // 6. CONTROLS
+    function fillSelect(id, items, value) {
+      const el = document.getElementById(id);
+      el.innerHTML = items.map(i => `<option value="${esc(i)}">${esc(i)}</option>`).join("");
+      el.value = value;
+    }
+    function syncSelects() {
+      document.getElementById("selCat").value = S.cat;
+      document.getElementById("selFrom").value = S.from;
+      document.getElementById("selTo").value = S.to;
+    }
     function drawChips() {
       document.getElementById("chips").innerHTML = ["All", ...BRANCHES]
-        .map(b => `<button class="${b === branch ? "on" : ""}" data-b="${b}">${b}</button>`).join("");
+        .map(b => `<button class="${b === S.branch ? "on" : ""}" data-b="${esc(b)}">${esc(b)}</button>`).join("");
       document.querySelectorAll("#chips button").forEach(btn => {
-        btn.onclick = () => { branch = btn.dataset.b; drawChips(); render(); };
+        btn.onclick = () => { S.branch = btn.dataset.b; drawChips(); render(); };
       });
     }
+    fillSelect("selCat", ["All", ...CATS], S.cat);
+    fillSelect("selFrom", MONTHS, S.from);
+    fillSelect("selTo", MONTHS, S.to);
+    document.getElementById("selCat").onchange = e => { S.cat = e.target.value; render(); };
+    document.getElementById("selFrom").onchange = e => {
+      S.from = e.target.value;
+      if (S.from > S.to) S.to = S.from;
+      syncSelects(); render();
+    };
+    document.getElementById("selTo").onchange = e => {
+      S.to = e.target.value;
+      if (S.to < S.from) S.from = S.to;
+      syncSelects(); render();
+    };
+    document.getElementById("reset").onclick = () => { S = { ...DEFAULTS }; drawChips(); syncSelects(); render(); };
 
     drawChips();
     render();
