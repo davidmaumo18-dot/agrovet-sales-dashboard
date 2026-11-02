@@ -41,7 +41,10 @@ Source file: the agrovet animal feed POS dataset (`agrovet_animal_feed_pos_datas
 
 ## Key findings
 
-- (Add 2 to 3 findings here, for example: which product earns the most, which branch has the best margin, or which months peak.)
+- Peter is the top salesperson at about KES 2.08M, roughly a quarter of all revenue and about 2.5 times Brian's KES 818,160.
+- Bank transfer and M-PESA lead the payment methods, ahead of cash and card.
+- Dairy meal 70kg is the top product, followed by Poultry Starter Feed 50kg.
+- The overall margin is 18.9%.
 
 ## About me
 
